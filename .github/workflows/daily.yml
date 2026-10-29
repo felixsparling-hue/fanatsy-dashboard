@@ -33,7 +33,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p out
-          if [ -f site/index.html ]; then cp site/index.html out/; else cp index.html out/; fi
+          cp "$(find . -iname index.html -not -path './out/*' | head -n 1)" out/index.html
           cp daily.json out/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
