@@ -1,0 +1,51 @@
+name: Daily fantasy update
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # 12:00 UTC = 7am EST / 8am EDT
+  workflow_dispatch:        # lets you run it manually from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install espn_api
+      - name: Pull ESPN data
+        env:
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+        run: python pull_espn.py
+      - name: Run recommendation engine
+        run: python analyze.py
+      - name: Assemble site
+        run: |
+          mkdir -p out
+          cp site/index.html out/
+          cp daily.json out/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
