@@ -1,9 +1,8 @@
 name: Daily fantasy update
 
 on:
-  schedule:
-    - cron: "0 12 * * *"   # about 7-8am Eastern
-    - cron: "0 23 * * *"   # about 6-7pm Eastern, fresh injury news before you add
+     schedule:
+    - cron: "*/30 11-23,0-4 * * *"   # every 30 min, roughly 7am to 1am Eastern
   workflow_dispatch:        # lets you run it manually from the Actions tab
 
 permissions:
