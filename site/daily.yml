@@ -1,0 +1,69 @@
+name: Daily fantasy update
+
+on:
+  schedule:
+    - cron: "7,37 11-23,0-4 * * *"   # twice an hour, roughly 7am to 1am Eastern
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      espn_error: ${{ steps.check.outputs.espn_error }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install espn_api
+      - name: Fetch previous data (used if ESPN fails)
+        run: curl -fsS "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/daily.json" -o prev.json || true
+      - name: Pull ESPN data
+        env:
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+        run: python pull_espn.py
+      - name: Check for ESPN errors
+        id: check
+        run: python -c "import json;d=json.load(open('raw_espn.json'));print('espn_error='+('true' if d.get('error') else 'false'))" >> "$GITHUB_OUTPUT"
+      - name: Run recommendation engine
+        run: python analyze.py
+      - name: Assemble site
+        run: |
+          mkdir -p out
+          cp "$(find . -iname index.html -not -path './out/*' | head -n 1)" out/index.html
+          cp daily.json out/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  alert:
+    # Marks the run as failed (so GitHub emails you) when the ESPN pull failed,
+    # AFTER the site has been published with its warning banner.
+    needs: [build, deploy]
+    if: needs.build.outputs.espn_error == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "ESPN pull failed. Your cookies have probably expired: update the ESPN_S2 and ESPN_SWID secrets."
+          exit 1
