@@ -2,7 +2,8 @@ name: Daily fantasy update
 
 on:
   schedule:
-    - cron: "0 12 * * *"   # 12:00 UTC = 7am EST / 8am EDT
+    - cron: "0 12 * * *"   # about 7-8am Eastern
+    - cron: "0 23 * * *"   # about 6-7pm Eastern, fresh injury news before you add
   workflow_dispatch:        # lets you run it manually from the Actions tab
 
 permissions:
@@ -33,7 +34,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p out
-          cp "$(find . -iname index.html -not -path './out/*' | head -n 1)" out/index.html
+          cp site/index.html out/
           cp daily.json out/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -49,3 +50,4 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
