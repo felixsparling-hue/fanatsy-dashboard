@@ -1,9 +1,9 @@
 name: Daily fantasy update
 
-on:
+   on:
      schedule:
-    - cron: "*/30 11-23,0-4 * * *"   # every 30 min, roughly 7am to 1am Eastern
-  workflow_dispatch:        # lets you run it manually from the Actions tab
+       - cron: "*/30 11-23,0-4 * * *"
+     workflow_dispatch:
 
 permissions:
   contents: read
