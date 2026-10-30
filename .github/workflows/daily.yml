@@ -1,6 +1,6 @@
 name: Daily fantasy update
 
-   on:
+on:
      schedule:
        - cron: "*/30 11-23,0-4 * * *"
      workflow_dispatch:
