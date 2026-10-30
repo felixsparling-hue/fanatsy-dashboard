@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fantasy Terminal</title>
+<style>
+:root{--bg:#0b0e13;--pn:#121821;--bd:#222c3a;--tx:#d7dee9;--mu:#7b8799;--ac:#ff8a1f;--g:#35d07f;--a:#f5b83d;--r:#ff5c6c;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f1f3f6;--pn:#fff;--bd:#d9dee6;--tx:#1b2330;--mu:#667286;--ac:#d9600a;--g:#1a9150;--a:#b57a00;--r:#d63a4a;color-scheme:light}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+main{max-width:1040px;margin:auto;padding:14px}
+header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;border-bottom:1px solid var(--ac);padding-bottom:8px;margin-bottom:12px}
+h1{font-size:16px;margin:0;color:var(--ac);letter-spacing:.08em}
+h2{font-size:12px;margin:0 0 8px;color:var(--mu);letter-spacing:.12em;text-transform:uppercase}
+.pn{background:var(--pn);border:1px solid var(--bd);border-radius:6px;padding:12px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.big{font-size:26px;font-weight:700}
+.mu{color:var(--mu)}.g{color:var(--g)}.a{color:var(--a)}.r{color:var(--r)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{padding:5px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--bd)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mu);font-weight:400;font-size:12px}
+.bar{display:inline-block;width:90px;height:8px;background:var(--bd);border-radius:4px;vertical-align:middle;margin-right:6px;overflow:hidden}
+.bar i{display:block;height:100%}
+.rec{border-left:3px solid var(--ac);padding:8px 10px;margin-bottom:8px;background:var(--bg)}
+.rec:first-of-type{border-left-color:var(--g)}
+.tag{border:1px solid var(--bd);border-radius:4px;padding:0 6px;font-size:12px;margin-right:4px;color:var(--mu)}
+button,label.btn{background:var(--ac);color:#000;border:0;border-radius:4px;padding:6px 12px;font:inherit;cursor:pointer;display:inline-block}
+#drop{border:1px dashed var(--bd);border-radius:6px;padding:26px;text-align:center}
+#drop.on{border-color:var(--ac)}
+tr.sel td{background:rgba(255,138,31,.12)}
+input[type=radio]{accent-color:var(--ac);width:16px;height:16px}
+</style></head><body><main>
+<header><h1>▌FANTASY TERMINAL</h1><span class="mu" id="stamp">no data loaded</span></header>
+<div id="drop" class="pn"><p>Load your <b>daily.json</b> (made by analyze.py) to see today’s board.</p>
+<label class="btn">Choose file<input id="f" type="file" accept=".json" hidden></label>
+<p class="mu">…or drag the file onto this box. Your data stays in your browser.</p></div>
+<div id="app" hidden>
+<div class="grid" id="kpi"></div>
+<div class="pn" style="margin-top:12px"><h2>Category battle</h2><div class="scroll"><table id="cats"></table></div></div>
+<div class="pn"><h2 id="rh">Best streamers</h2><div id="recs"></div></div>
+<div class="pn"><h2>Your roster · pick your streaming spot</h2>
+<p class="mu" style="margin:0 0 8px">Select who you’ll drop tomorrow. The projections assume he’s gone and a typical streamer fills his spot each day.</p>
+<div class="scroll"><table id="ros"></table></div></div>
+<button id="clr">Clear data</button></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const CATS=["PTS","REB","AST","STL","BLK","3PM"],KEYS=[...CATS,"FGM","FGA","FTM","FTA"],ORDER=[...CATS,"FG%","FT%"];
+const cls=p=>p>=.7?'g':p>=.3?'a':'r',tagf=p=>p>=.7?'SAFE':p>=.3?'SWING':'LONG SHOT';
+const fmt=(c,v)=>v==null||isNaN(v)?'–':(c.includes('%')?v.toFixed(3).replace(/^0/,''):Math.round(v));
+const zero=()=>Object.fromEntries(KEYS.map(k=>[k,0]));
+const addDays=(iso,n)=>{const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
+const wd=iso=>new Date(iso+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});
+const range=(a,b)=>{const o=[];let x=a;while(x<=b){o.push(x);x=addDays(x,1)}return o};
+function erf(x){const s=x<0?-1:1;x=Math.abs(x);const t=1/(1+.3275911*x);return s*(1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-.284496736)*t+.254829592)*t*Math.exp(-x*x))}
+const phi=x=>.5*(1+erf(x/Math.SQRT2));
+let D=null,streamer=null;
+try{streamer=localStorage.getItem('ft_streamer')}catch(e){}
+
+function compute(E,name){
+ const dates=range(E.today,E.end),W=E.b2b_weight,t1=E.target,t2=addDays(t1,1);
+ const on=(p,d)=>p.pg&&p.av>0&&p.days.includes(d);
+ const game=(p,d)=>{if(!on(p,d))return zero();const o={};KEYS.forEach(k=>o[k]=p.pg[k]*p.av);return o};
+ const add=(a,b,s=1)=>{KEYS.forEach(k=>a[k]+=s*b[k])};
+ const pool=E.fa.filter(p=>p.av>0&&p.pg).slice(0,30);
+ const typ=d=>{const l=pool.filter(p=>p.days.includes(d)),o=zero();if(!l.length)return o;l.forEach(p=>KEYS.forEach(k=>o[k]+=p.pg[k]*p.av/l.length));return o};
+ const sp=name&&name!=='auto'?E.me.find(p=>p.name===name):null;
+ const tally=(roster,cur,isMe)=>{const t={...cur};let g=0;
+  roster.forEach(p=>dates.forEach(d=>{
+   if(isMe&&p===sp&&d>=t1)return;
+   if(on(p,d)){add(t,game(p,d));g+=p.av}}));
+  if(isMe&&sp)dates.filter(d=>d>=t1).forEach(d=>{add(t,typ(d));g++});
+  return[t,g]};
+ const[me,mg]=tally(E.me,E.cur.me,true),[opp,og]=tally(E.opp,E.cur.opp,false);
+ const wp=(m,o,g)=>{const r={};g=Math.max(g,1);
+  CATS.forEach(c=>r[c]=phi((m[c]-o[c])/(E.sigma[c]*Math.sqrt(g))));
+  [['FG%','FGM','FGA'],['FT%','FTM','FTA']].forEach(([c,a,b])=>{const pm=m[a]/Math.max(m[b],1),po=o[a]/Math.max(o[b],1);
+   const sd=1.3*Math.sqrt(pm*(1-pm)/Math.max(m[b],1)+po*(1-po)/Math.max(o[b],1));r[c]=phi((pm-po)/Math.max(sd,1e-6))});return r};
+ const sum=o=>Object.values(o).reduce((a,b)=>a+b,0);
+ const base=wp(me,opp,mg+og),be=sum(base),recs=[];
+ const drops=sp?[sp]:E.me.filter(p=>p.slot!=='IR');
+ E.fa.forEach(fa=>{if(!on(fa,t1))return;
+  const n1=game(fa,t1),n2=t2<=E.end?game(fa,t2):zero();let best=null;
+  drops.forEach(dr=>{const t={...me};
+   if(sp){add(t,n1);add(t,typ(t1),-1);if(t2<=E.end){add(t,n2,W);add(t,typ(t2),-W)}}
+   else{add(t,n1);add(t,game(dr,t1),-1);if(t2<=E.end){add(t,n2,W);add(t,game(dr,t2),-W)}}
+   const e=sum(wp(t,opp,mg+og));if(!best||e>best.e)best={e,dr,t}});
+  const af=wp(best.t,opp,mg+og);
+  recs.push({fa,drop:best.dr,gain:best.e-be,helps:[...ORDER].sort((a,b)=>(af[b]-base[b])-(af[a]-base[a])).slice(0,3),
+   days:dates.filter(d=>d>=t1&&fa.days.includes(d)),b2b:t2<=E.end&&fa.days.includes(t2)})});
+ recs.sort((a,b)=>b.gain-a.gain||(b.b2b-a.b2b));
+ return{base,be,me,opp,recs:recs.slice(0,8),sp,dates}}
+
+function render(d){
+ D=d;$('drop').hidden=true;$('app').hidden=false;
+ $('stamp').textContent=(d.generated_at?'data pulled '+d.generated_at:'updated for '+d.date)+' · week ends '+d.week_end;
+ const E=d.engine;
+ if(!E){$('app').innerHTML='<div class="pn r">This data file is the old format. Run the latest analyze.py.</div>';return}
+ if(streamer&&streamer!=='auto'&&!E.me.some(p=>p.name===streamer))streamer=null;
+ if(!streamer)streamer=d.streamer&&E.me.some(p=>p.name===d.streamer)?d.streamer:'auto';
+ const R=compute(E,streamer),best=R.recs[0];
+ $('rh').textContent='Best streamers for '+wd(E.target)+' '+E.target.slice(5)+' (add tonight)';
+ $('kpi').innerHTML=
+  `<div class="pn"><h2>Matchup</h2><div>${d.matchup.me}</div><div class="mu">vs ${d.matchup.opponent}</div></div>
+   <div class="pn"><h2>Expected cats</h2><div class="big ${cls(R.be/8)}">${R.be.toFixed(2)}<span class="mu"> / 8</span></div></div>
+   <div class="pn"><h2>Streaming spot</h2><div class="big" style="font-size:18px">${R.sp?R.sp.name:'auto'}</div><div class="mu">${R.sp?'dropped tomorrow':'best drop each time'}</div></div>
+   <div class="pn"><h2>Top pickup</h2><div class="big g" style="font-size:18px">${best?best.fa.name:'none'}</div><div class="mu">${best?'+'+best.gain.toFixed(2)+' cats':''}</div></div>`;
+ $('cats').innerHTML='<tr><th>Cat</th><th>Now: me</th><th>opp</th><th>Proj: me</th><th>opp</th><th>Win chance</th><th></th></tr>'+
+  ORDER.map(c=>{const p=R.base[c];let a,b,cu=d.current[c]||{};
+   if(c==='FG%'){a=R.me.FGM/R.me.FGA;b=R.opp.FGM/R.opp.FGA}else if(c==='FT%'){a=R.me.FTM/R.me.FTA;b=R.opp.FTM/R.opp.FTA}else{a=R.me[c];b=R.opp[c]}
+   return `<tr><td><b>${c}</b></td><td>${fmt(c,cu.me)}</td><td class="mu">${fmt(c,cu.opp)}</td><td>${fmt(c,a)}</td><td class="mu">${fmt(c,b)}</td>
+   <td><span class="bar"><i style="width:${Math.round(p*100)}%;background:var(--${cls(p)})"></i></span><span class="${cls(p)}">${Math.round(p*100)}%</span></td><td class="${cls(p)}">${tagf(p)}</td></tr>`}).join('');
+ $('recs').innerHTML=R.recs.length?R.recs.map((r,i)=>{const g=r.fa.pg;
+  return `<div class="rec"><b>${i+1}. ADD ${r.fa.name}</b> <span class="mu">${r.fa.team} · ${r.fa.pos}</span> &nbsp; DROP <b>${r.drop.name}</b>
+   <div><span class="g">+${r.gain.toFixed(3)} expected cats</span> · plays ${r.days.map(wd).join(', ')||'–'}</div>
+   <div class="mu">${g.PTS.toFixed(0)} pts · ${g.REB.toFixed(1)} reb · ${g.AST.toFixed(1)} ast · ${g.STL.toFixed(1)} stl · ${g.BLK.toFixed(1)} blk · ${g['3PM'].toFixed(1)} 3pm</div>
+   <div>${r.b2b?'<span class="tag">plays next day too</span>':''}<span class="tag">helps ${r.helps.join(', ')}</span>${r.fa.inj&&r.fa.inj!=='ACTIVE'?`<span class="tag">${r.fa.inj}</span>`:''}</div></div>`}).join(''):'<span class="mu">No free agents with a game that day.</span>';
+ $('ros').innerHTML='<tr><th>Streamer</th><th>Player</th><th>Team</th><th>Pos</th><th>Status</th><th>Games left</th><th>Tomorrow</th></tr>'+
+  `<tr><td><input type="radio" name="sp" value="auto" ${streamer==='auto'?'checked':''}></td><td colspan="6" class="mu" style="text-align:left">Auto (choose the best drop for me)</td></tr>`+
+  E.me.map(p=>{const out=['OUT','INJURY_RESERVE'].includes((p.inj||'').toUpperCase())||p.slot==='IR';
+   const gl=R.dates.filter(x=>p.days.includes(x)).length,sel=streamer===p.name;
+   return `<tr class="${sel?'sel':''}"><td><input type="radio" name="sp" value="${p.name.replace(/"/g,'&quot;')}" ${sel?'checked':''}></td><td>${p.name}</td><td>${p.team}</td><td>${p.pos}</td><td class="${out?'r':'mu'}">${p.slot==='IR'?'IR':p.inj||'ACTIVE'}</td><td>${gl}</td><td>${p.days.includes(E.target)?'●':'·'}</td></tr>`}).join('');
+ document.querySelectorAll('input[name=sp]').forEach(r=>r.onchange=()=>{streamer=r.value;try{localStorage.setItem('ft_streamer',streamer)}catch(e){}render(D)});
+}
+function load(text,keep){try{const d=JSON.parse(text);render(d);if(keep){try{localStorage.setItem('ft',text)}catch(e){}}}catch(e){console.error(e);alert('Could not read that file: '+e.message)}}
+$('f').onchange=e=>{const f=e.target.files[0];if(f)f.text().then(t=>load(t,1))};
+const dz=$('drop');
+dz.ondragover=e=>{e.preventDefault();dz.classList.add('on')};
+dz.ondragleave=()=>dz.classList.remove('on');
+dz.ondrop=e=>{e.preventDefault();dz.classList.remove('on');const f=e.dataTransfer.files[0];if(f)f.text().then(t=>load(t,1))};
+$('clr').onclick=()=>{try{localStorage.removeItem('ft')}catch(e){}$('app').hidden=true;$('drop').hidden=false;$('stamp').textContent='no data loaded'};
+fetch('daily.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()}).then(t=>load(t,0))
+.catch(e=>{$('stamp').textContent='auto-load failed: '+e.message;try{const s=localStorage.getItem('ft');if(s)load(s,0)}catch(x){}});
+</script></body></html>
